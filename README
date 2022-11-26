@@ -1,0 +1,3 @@
+# plog
+
+Simple `slog.Attr` functions to log protobuf types.

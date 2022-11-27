@@ -1,7 +1,6 @@
 package plog
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -25,51 +24,39 @@ var (
 )
 
 var (
-	wktStruct      = (&structpb.Struct{}).ProtoReflect().Descriptor().FullName()
-	wktFieldMask   = (&fieldmaskpb.FieldMask{}).ProtoReflect().Descriptor().FullName()
-	wktTimestamp   = (&timestamppb.Timestamp{}).ProtoReflect().Descriptor().FullName()
-	wktDuration    = (&durationpb.Duration{}).ProtoReflect().Descriptor().FullName()
-	wktAny         = (&anypb.Any{}).ProtoReflect().Descriptor().FullName()
-	wktEmpty       = (&emptypb.Empty{}).ProtoReflect().Descriptor().FullName()
-	wktBoolValue   = (&wrapperspb.BoolValue{}).ProtoReflect().Descriptor().FullName()
-	wktStringValue = (&wrapperspb.StringValue{}).ProtoReflect().Descriptor().FullName()
-	wktBytesValue  = (&wrapperspb.BytesValue{}).ProtoReflect().Descriptor().FullName()
-	wktInt32Value  = (&wrapperspb.Int32Value{}).ProtoReflect().Descriptor().FullName()
-	wktInt64Value  = (&wrapperspb.Int64Value{}).ProtoReflect().Descriptor().FullName()
-	wktUInt32Value = (&wrapperspb.UInt32Value{}).ProtoReflect().Descriptor().FullName()
-	wktUInt64Value = (&wrapperspb.UInt64Value{}).ProtoReflect().Descriptor().FullName()
-	wktFloatValue  = (&wrapperspb.FloatValue{}).ProtoReflect().Descriptor().FullName()
-	wktDoubleValue = (&wrapperspb.DoubleValue{}).ProtoReflect().Descriptor().FullName()
-
 	wktSet = map[protoreflect.FullName]bool{
-		wktStruct:      true,
-		wktFieldMask:   true,
-		wktTimestamp:   true,
-		wktDuration:    true,
-		wktAny:         true,
-		wktEmpty:       true,
-		wktBoolValue:   true,
-		wktStringValue: true,
-		wktBytesValue:  true,
-		wktInt32Value:  true,
-		wktInt64Value:  true,
-		wktUInt32Value: true,
-		wktUInt64Value: true,
-		wktFloatValue:  true,
-		wktDoubleValue: true,
+		(&anypb.Any{}).ProtoReflect().Descriptor().FullName():       true,
+		(&structpb.Struct{}).ProtoReflect().Descriptor().FullName(): true,
+
+		(&emptypb.Empty{}).ProtoReflect().Descriptor().FullName():         true,
+		(&fieldmaskpb.FieldMask{}).ProtoReflect().Descriptor().FullName(): true,
+
+		(&durationpb.Duration{}).ProtoReflect().Descriptor().FullName():   true,
+		(&timestamppb.Timestamp{}).ProtoReflect().Descriptor().FullName(): true,
+
+		(&wrapperspb.BoolValue{}).ProtoReflect().Descriptor().FullName():   true,
+		(&wrapperspb.BytesValue{}).ProtoReflect().Descriptor().FullName():  true,
+		(&wrapperspb.Int32Value{}).ProtoReflect().Descriptor().FullName():  true,
+		(&wrapperspb.Int64Value{}).ProtoReflect().Descriptor().FullName():  true,
+		(&wrapperspb.FloatValue{}).ProtoReflect().Descriptor().FullName():  true,
+		(&wrapperspb.StringValue{}).ProtoReflect().Descriptor().FullName(): true,
+		(&wrapperspb.UInt32Value{}).ProtoReflect().Descriptor().FullName(): true,
+		(&wrapperspb.UInt64Value{}).ProtoReflect().Descriptor().FullName(): true,
+		(&wrapperspb.DoubleValue{}).ProtoReflect().Descriptor().FullName(): true,
 	}
 )
 
 // Msg returns a [slog.Attr] for any [proto.Message].
-func Msg(key string, m proto.Message) slog.Attr {
+func Msg(key string, m proto.Message, opts ...Option) slog.Attr {
 	return slog.Attr{
 		Key:   key,
-		Value: slog.AnyValue(msgValuer{m.ProtoReflect()}),
+		Value: slog.AnyValue(msgValuer{m.ProtoReflect(), newOptions(opts)}),
 	}
 }
 
 // Enum returns a [slog.Attr] for any proto enum value.
-func Enum(key string, e protoreflect.Enum) slog.Attr {
+// It prints the string representation of the enum.
+func Enum(key string, e protoreflect.Enum, opts ...Option) slog.Attr {
 	return slog.Attr{
 		Key:   key,
 		Value: slog.AnyValue(enumValuer{e}),
@@ -81,7 +68,7 @@ func Enum(key string, e protoreflect.Enum) slog.Attr {
 func Map[
 	K string | int32 | uint32 | bool,
 	V proto.Message,
-](key string, m map[K]V) slog.Attr {
+](key string, m map[K]V, opts ...Option) slog.Attr {
 	return slog.Attr{
 		Key:   key,
 		Value: slog.AnyValue(mapValuer[K, V]{M: m}),
@@ -89,7 +76,8 @@ func Map[
 }
 
 type mapValuer[K string | int32 | int64 | uint32 | uint64 | bool, V proto.Message] struct {
-	M map[K]V
+	M    map[K]V
+	Opts options
 }
 
 func (m mapValuer[K, V]) LogValue() slog.Value {
@@ -117,7 +105,7 @@ func (m mapValuer[K, V]) LogValue() slog.Value {
 			attrs,
 			slog.Attr{
 				Key:   key,
-				Value: slog.AnyValue(msgValuer{v.ProtoReflect()}),
+				Value: slog.AnyValue(msgValuer{v.ProtoReflect(), m.Opts}),
 			},
 		)
 	}
@@ -141,6 +129,7 @@ func (e enumValuer) LogValue() slog.Value {
 
 type msgValuer struct {
 	protoreflect.Message
+	Opts options
 }
 
 func (m msgValuer) LogValue() slog.Value {
@@ -148,19 +137,19 @@ func (m msgValuer) LogValue() slog.Value {
 		return slog.GroupValue()
 	}
 	if wktSet[m.Descriptor().FullName()] {
-		return getWKTValue(m.Message)
+		return getWKTValue(m.Message, m.Opts)
 	}
 	fields := m.Descriptor().Fields()
 	attrs := make([]slog.Attr, 0, fields.Len())
 	for i := 0; i < fields.Len(); i++ {
 		fd := fields.Get(i)
 		// Skip unpopulated
-		if !m.Has(fd) {
+		if !m.Has(fd) || m.Opts.skip(fd) {
 			continue
 		}
 		attr := slog.Attr{
 			Key:   string(fd.Name()),
-			Value: getValueForProtoValue(fd, m.Get(fd)),
+			Value: getValueForProtoValue(fd, m.Get(fd), m.Opts),
 		}
 		of := fd.ContainingOneof()
 		if of != nil && !of.IsSynthetic() {
@@ -174,13 +163,14 @@ func (m msgValuer) LogValue() slog.Value {
 func getValueForProtoValue(
 	fd protoreflect.FieldDescriptor,
 	v protoreflect.Value,
+	opts options,
 ) slog.Value {
 	switch {
 	case fd.IsList():
 		l := v.List()
 		values := make([]slog.Value, 0, l.Len())
 		for i := 0; i < l.Len(); i++ {
-			values = append(values, getValueByKind(fd, l.Get(i)))
+			values = append(values, getValueByKind(fd, l.Get(i), opts))
 		}
 		return slog.AnyValue(values)
 	case fd.IsMap():
@@ -192,7 +182,7 @@ func getValueForProtoValue(
 					attrs,
 					slog.Attr{
 						Key:   mk.String(),
-						Value: getValueByKind(fd.MapValue(), v),
+						Value: getValueByKind(fd.MapValue(), v, opts),
 					},
 				)
 				return true
@@ -200,13 +190,14 @@ func getValueForProtoValue(
 		)
 		return slog.GroupValue(attrs...)
 	default:
-		return getValueByKind(fd, v)
+		return getValueByKind(fd, v, opts)
 	}
 }
 
 func getValueByKind(
 	fd protoreflect.FieldDescriptor,
 	v protoreflect.Value,
+	opts options,
 ) slog.Value {
 	switch fd.Kind() {
 	case protoreflect.BoolKind:
@@ -223,7 +214,7 @@ func getValueByKind(
 	case protoreflect.StringKind:
 		return slog.StringValue(v.String())
 	case protoreflect.BytesKind:
-		return slog.StringValue(base64.StdEncoding.EncodeToString(v.Bytes()))
+		return opts.bytes((v.Bytes()))
 	case protoreflect.EnumKind:
 		e := v.Enum()
 		if ev := fd.Enum().Values().ByNumber(e); ev != nil {
@@ -231,13 +222,13 @@ func getValueByKind(
 		}
 		return slog.StringValue(strconv.Itoa(int(e)))
 	case protoreflect.MessageKind:
-		return msgValuer{v.Message()}.LogValue()
+		return msgValuer{v.Message(), opts}.LogValue()
 	default:
 		return slog.AnyValue(v.Interface())
 	}
 }
 
-func getWKTValue(m protoreflect.Message) slog.Value {
+func getWKTValue(m protoreflect.Message, opts options) slog.Value {
 	if m.Interface() == nil {
 		return slog.AnyValue(nil)
 	}
@@ -247,7 +238,7 @@ func getWKTValue(m protoreflect.Message) slog.Value {
 		if err != nil {
 			return errValue(fmt.Sprintf("failed to unmarshal any: %v", err))
 		}
-		return msgValuer{m.ProtoReflect()}.LogValue()
+		return msgValuer{m.ProtoReflect(), opts}.LogValue()
 	case *fieldmaskpb.FieldMask:
 		return slog.StringValue(strings.Join(v.Paths, ","))
 	case *structpb.Struct:
@@ -261,7 +252,7 @@ func getWKTValue(m protoreflect.Message) slog.Value {
 	case *wrapperspb.BoolValue:
 		return slog.BoolValue(v.Value)
 	case *wrapperspb.BytesValue:
-		return slog.StringValue(base64.StdEncoding.EncodeToString(v.Value))
+		return opts.bytes((v.Value))
 	case *wrapperspb.DoubleValue:
 		return slog.Float64Value(v.Value)
 	case *wrapperspb.FloatValue:

@@ -8,20 +8,22 @@ import (
 )
 
 // Option is a log option.
-type Option func(*options)
+type Option func(options) options
 
 // Skip returns an [Option] that is used to skip fields based on a predicate.
 func Skip(predicate func(protoreflect.FieldDescriptor) bool) Option {
-	return func(o *options) {
+	return func(o options) options {
 		o.skip = predicate
+		return o
 	}
 }
 
 // Bytes returns an [Option] that is be used to customise how []byte slices
 // are printed. The default is base64 encoded string.
 func Bytes(transform func([]byte) slog.Value) Option {
-	return func(o *options) {
+	return func(o options) options {
 		o.bytes = transform
+		return o
 	}
 }
 
@@ -38,7 +40,7 @@ func newOptions(ops []Option) options {
 		},
 	}
 	for _, apply := range ops {
-		apply(&o)
+		o = apply(o)
 	}
 	return o
 }

@@ -71,7 +71,7 @@ func Map[
 ](key string, m map[K]V, opts ...Option) slog.Attr {
 	return slog.Attr{
 		Key:   key,
-		Value: slog.AnyValue(mapValuer[K, V]{M: m}),
+		Value: slog.AnyValue(mapValuer[K, V]{M: m, Opts: newOptions(opts)}),
 	}
 }
 
